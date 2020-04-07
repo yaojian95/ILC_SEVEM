@@ -6,12 +6,12 @@ Both ILC in harmonic space and pixel space are defined.
 import logging as log
 import numpy as np
 import matplotlib.pyplot as plt
-
+import pymaster as nmt
 ### ILC in l-space
 
 class ILC_L(object):
     
-    def __init__(self, signal, noise = None, Nf, bins = None, lmax = None):
+    def __init__(self, nside, lmax, bin_w, beam = None):
         
         '''
         ILC in spherical space to do the foreground removal.
@@ -25,40 +25,85 @@ class ILC_L(object):
         * N_modes: number of angular modes
         '''
         
-        self.signal = signal; self.noise = noise  
+        self.nside = nside; self.lmax = lmax;
         
+        self.b = nmt.NmtBin(self.nside, nlb=bin_w, lmax=self.lmax)
         
+        self.ell_n = self.b.get_effective_ells(); self.lbin = len(self.ell_n); self.el2 = self.l2(self.ell_n)
+        
+    def l2(self, ell):
+        '''
+        get the l^2/np.pi
+        '''
+        
+        return ell*(ell+1)/2/np.pi
+
+    
+    def Select_fre(self, ps_in, sel):
+        
+        '''
+        Take some part of the cross power spectrum matrix
+        
+        '''
+        # sel = np.array((1,2,3))
+        n_fre = len(sel)
+        ps_out = np.ones((self.lbin, n_fre, n_fre)); ### selected power spectra
+        
+        for q in range(self.lbin):
+            x = 0; 
+            for i in (sel):
+                y = 0;
+                for j in (sel):
+                    ps_out[q][x,y] = ps_in[q][i, j];
+                    y += 1;   
+                x += 1;
+                
+        return ps_out
+    
     # calculate the weight for each multipole bin
     
-    def __call__(self, psbin, absbin):
-#        log.debug('@ abspipe::__call__')
-        return self.run(psbin, absbin)
+    #def __call__(self, sel):
+##        log.debug('@ abspipe::__call__')
+        #return self.run(sel)    
     
-    def run(self, psbin, absbin):
+    def run(self, signal, noise, sel, return_maps = False, return_weights = False):
         
         '''
-                ILC pipeline class call function.  
+        ILC class call function.  
         '''
+        total_bin = self.Select_fre(signal, sel); 
+        noise_bin = self.Select_fre(noise, sel);
         
-    
-        W = np.matrix(np.zeros((Q, Nf)))  # Q = lmax/bins
+        _nf = len(sel)
         
-        for l in range(Q):
+        e = np.matrix(np.ones(_nf)); cl_ilc = np.zeros(self.lbin); noise_ilc = np.zeros(self.lbin)
+        W = np.matrix(np.zeros((self.lbin, _nf)))  # Q = lmax/bins
+        
+        for l in range(self.lbin):
             
             norm = e*np.linalg.pinv((total_bin[l]))*e.T
            
             W[l,:] = e*np.linalg.pinv((total_bin[l]))/norm   
         
-        for i in range(Q):
+        for i in range(self.lbin):
                     
             noise_ilc[i] = W[i,:]*(noise_bin[i])*np.transpose(W[i,:])  
-            Cl_ilc[n, i] = W[i,:]*(total_bin[i])*np.transpose(W[i,:]) - noise_ilc[i]
+            cl_ilc[i] = W[i,:]*(total_bin[i])*np.transpose(W[i,:]) - noise_ilc[i]
             
-    def ILC_maps(self, signal):
+        
+        if return_weights:
+            return(cl_ilc, W)
+        
+        return cl_ilc
+    
+        
+    def ILC_maps(self, signal, W):
         
         '''
         Apply the ILC weights in harmonic space to the alms to get the cleaned maps' alms,
         which are then transformed back to pixels.
+        
+        !!! in this case, bin_width = 1 !!!
         '''
         
         m_num = int((1 + lmax)*(lmax+1 -1)/2) # the number of alm of lmax=l for m >= 0; m = 0,1 for l = 1; m = 0,1,2 for l = 2.
@@ -82,10 +127,10 @@ class ILC_L(object):
         
         return cmb_clean
             
-    def plot_weight():
-        Ell = binell()
-        for i in range(Nf):
-            plt.plot(Ell, W[:, i], label = '%s'%fre[i])
+    #def plot_weight():
+        #Ell = binell()
+        #for i in range(Nf):
+            #plt.plot(Ell, W[:, i], label = '%s'%fre[i])
    
 ### ILC in pixel space         
 class ILC_P(object):
