@@ -92,12 +92,12 @@ class ILC_L(object):
             
         
         if return_weights:
-            return(cl_ilc, W)
+            self.w = W
         
         return cl_ilc
     
         
-    def ILC_maps(self, signal, W):
+    def ILC_maps(self, total_mask, W):
         
         '''
         Apply the ILC weights in harmonic space to the alms to get the cleaned maps' alms,
@@ -139,33 +139,45 @@ class ILC_P(object):
     ILC in pixel space to do the foreground removal.
     '''
     
-    def __init__(self, signal):
-        self.signal = signal
+    def __init__(self, signal_maps, nl, mask_in):
         
-    def __call__(self, psbin, absbin):
-#        log.debug('@ abspipe::__call__')
-        return self.run(psbin, absbin)
-    
-    def run(self, psbin, absbin): 
+        self.signal = signal_maps; self.nl =nl; # use nl to do the noise debias.nl is from the ensemble average of noise reanlizations
         
-        total_Q = np.zeros((Nf, 12*nside**2)) ; total_U = np.zeros((Nf, 12*nside**2))## two frequencies
-        noise_Q = np.zeros((Nf, 12*nside**2)); noise_U= np.zeros((Nf, 12*nside**2))
+        self.mask = mask_in; pix_list = np.arange(len(mask_in)); self.nside = hp.npix2nside(len(mask_in))
+        
+        self.avai_index = pix_list[np.where(mask == 1)] # the pixel index of the remained region 
+            
+        self.norm = 1.0/len(self.avai_index)
+        
+    #def __call__(self, psbin, absbin):
+##        log.debug('@ abspipe::__call__')
+        #return self.run(psbin, absbin)
     
-        for i in range(Nf):
-            total_Q[i][mask_index] = total_mask[i][1][mask_index]
-            total_U[i][mask_index] = total_mask[i][2][mask_index]
+    def run(self): 
+        '''
+        ILC in pixel space.
+        
+        return: the cleaned CMB maps, in which only QU components are cleaned and I map is not considered. 
+        '''
     
-            # noise_ILC
-            noise_Q[i][mask_index] = noise_mask[i][1][mask_index]
-            noise_U[i][mask_index] = noise_mask[i][2][mask_index]
+        Nf = len(self.signal)
+        
+        total_Q = self.signal[:,1,:]; total_U = self.signal[:,2,:];
     
         Cov_Q = np.zeros((Nf, Nf)); w_Q = np.zeros(Nf)
         Cov_U = np.zeros((Nf, Nf)); w_U = np.zeros(Nf)
     
         for i in range(Nf):
             for j in range(Nf):
-                Cov_Q[i, j] = np.dot(total_Q[i][mask_index] - np.mean(total_Q[i][mask_index]), total_Q[j][mask_index] - np.mean(total_Q[j][mask_index]))/1.0/len(mask_index)
-                Cov_U[i, j] = np.dot(total_U[i][mask_index] - np.mean(total_U[i][mask_index]), total_U[j][mask_index] - np.mean(total_U[j][mask_index]))/1.0/len(mask_index)
+                
+                tq_i = total_Q[i][self.avai_index] - np.mean(total_Q[i][self.avai_index]);
+                tq_j = total_Q[j][self.avai_index] - np.mean(total_Q[j][self.avai_index])
+                
+                tu_i = total_U[i][self.avai_index] - np.mean(total_U[i][self.avai_index]);
+                tu_j = total_U[j][self.avai_index] - np.mean(total_U[j][self.avai_index])
+                
+                Cov_Q[i, j] = np.dot(tq_i, tq_j)*self.norm
+                Cov_U[i, j] = np.dot(tu_i, tu_j)*self.norm
     
         Cov_Q_inv = np.linalg.pinv(Cov_Q)
         Cov_U_inv = np.linalg.pinv(Cov_U)
@@ -181,14 +193,4 @@ class ILC_P(object):
         cmb_I = np.zeros_like(cmb_Q);
         cmb_ILC_pix = np.row_stack((cmb_I, cmb_Q, cmb_U))
     
-        noise_ilc_q = np.dot(w_Q, noise_Q); noise_ilc_u = np.dot(w_U, noise_U)
-        noise_I = np.zeros_like(noise_ilc_q)
-        noise_ilc_pix = np.row_stack((noise_I, noise_ilc_q, noise_ilc_u))
-        
-        cls_ILC_pix = hp.anafast(cmb_ILC_pix, lmax = lmax, nspec = 3)
-        nl_ilc_pix = hp.anafast(noise_ilc_pix, lmax = lmax, nspec = 3)
-        
-        Cl_ilc_rs[0,n] = bin_l(cls_ILC_pix[1], lmax, Q); Cl_ilc_rs[1,n]  = bin_l(cls_ILC_pix[2], lmax, Q)
-        Nl_ilc_rs[0,n] = bin_l(nl_ilc_pix[1], lmax, Q); Nl_ilc_rs[1,n] = bin_l(nl_ilc_pix[2], lmax, Q)        
-        
-
+        return cmb_ILC_pix, (w_Q, w_U)
